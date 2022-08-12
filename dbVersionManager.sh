@@ -41,8 +41,8 @@ lastAppliedVers="No version applied";
 actVer="unknown";
 maxVer="unknown";
 progName="$0";
-mysqlCli="mysql";
-mysqlCliWin="mysqlsh.exe";
+sqlCli="mysql";
+availableSQLCli=("mysql" "mysqlsh.exe" "psql")
 versRegx='^[0-9]+(\.[0-9]+)*$';
 
 printHelp() {
@@ -74,8 +74,9 @@ printHelp() {
     res+="     @              @ A prompt will be displayed when bypass is available, be carreful.\n"
     res+="     @--versionMonitoringOnly@Only enabling version monitoring, no scripts applied\n"
     res+="     @              @ A prompt will be displayed when bypass is available, be carreful.\n"
-    res+="     @--windows@Use this flag if this script is executed from windows, the mysql client will be different\n"
-    res+="     @              @ For windows client is [$mysqlCliWin], and [$mysqlCli] otherwise.\n"
+    res+="     @--client@Use this flag to select the SQL client\n"
+    res+="     @              @ Can be either: ($(echo ${availableSQLCli[*]})).\n"
+    res+="     @              @ Default is [$sqlCli]\n"
     res+="  -y,@--yes@Do not display prompts, answer yes every time\n"
     echo -e "$res" | column -ts '@'
 
@@ -126,7 +127,7 @@ while (( "$#" )); do
         --bypassErrors) ByPassErrors="Yes" ;;
         -s|--safe) SafeMigration="Yes"; SafeMigrationVersion="$2"; shift ;;
         --versionMonitoringOnly) OnlyVersionMonitoring="Yes" ;;
-        --windows) mysqlCli="$mysqlCliWin" ;;
+        --client) sqlCli="$2"; shift ;;
         -y|--yes) PassYes="Yes" ;;
         --help) printHelp; exit 0 ;;
         *) echo "Unknown parameter : $1"; printHelp; exit 1 ;;
@@ -140,7 +141,7 @@ done
 
 if [[ "$DBname" = "" || "$DBhost" = "" || "$DBuser" = "" ]] && [[ ! -f $ConfFile ]];
 then
-    echo "Invalid config path parameter."
+    echo "Invalid config parameters."
     printHelp
     exit 1;
 fi
@@ -238,9 +239,9 @@ fi
 # Mysql client verification
 #
 
-if ! command -v $mysqlCli &> /dev/null
+if ! command -v $sqlCli &> /dev/null
 then
-    echo "ERROR Mysql client [$mysqlCli] could not be found, see --windows."
+    echo "ERROR Mysql client [$sqlCli] could not be found, --client must be one of ($(echo ${availableSQLCli[*]})) and available on your computer."
     exit 1
 fi
 
@@ -248,11 +249,25 @@ fi
 # Declaration of useful tools
 #
 
-mysqlParams="-h $DBhost -u $DBuser --password=$DBpass";
-if [ "$mysqlCli" = "$mysqlCliWin" ];
+# TODO not default port selection
+
+if [ "$sqlCli" = "mysql" ];
 then
-    mysqlParams="--save-passwords=never $mysqlParams --sql";
+    sqlParamsMin="-h $DBhost -u $DBuser --password=$DBpass";
+    sqlParams="$sqlParamsMin -D $DBname";
 fi
+if [ "$sqlCli" = "mysqlsh.exe" ];
+then
+    sqlParamsMin="-h $DBhost -u $DBuser --password=$DBpass";
+    sqlParams="$sqlParamsMin --save-passwords=never --sql -D $DBname";
+fi
+if [ "$sqlCli" = "psql" ];
+then
+    sqlParamsMin="-h $DBhost -U $DBuser";
+    export PGPASSWORD=$DBpass
+    sqlParams="$sqlParamsMin -qt -d $DBname -c \"SET search_path = $DBname;\"";
+fi
+
 lastResult=$(mktemp $TmpFolder/.dbVersionManager.XXXXXXXXXXX.tmp)
 migrationScripts=$(ls -p $MigrationFolder/ | grep -E "$versRegx" | sort -V)
 milestoneScripts=$(ls -p $MilestoneFolder/ | grep -E "${versRegx::-1}(\-milestone)$" | cut -d - -f 1 | sort -V)
@@ -304,16 +319,43 @@ isClosest() {
 }
 
 runAndSave () {
-    "$@" >$lastResult 2>&1
+    eval "$@" >$lastResult 2>&1
     return $?
 }
 
-execScript() {
-    if [ "$mysqlCli" = "$mysqlCliWin" ];
+execScript() { # TODO Generalize
+    if [ ! "$sqlCli" = "mysql" ];
     then
-        runAndSave $mysqlCli $mysqlParams -D $DBname -f $1
+        runAndSave $sqlCli $sqlParams -f $1
     else
-        runAndSave $mysqlCli $mysqlParams -D $DBname < $1
+        runAndSave $sqlCli $sqlParams < $1
+    fi
+}
+
+execCmd() { # TODO Generalize
+    if [ "$sqlCli" = "psql" ];
+    then
+        eval "$sqlCli $sqlParams -c \"$1\""
+    else
+        eval "$sqlCli $sqlParams -e \"$1\""
+    fi
+}
+
+execCmdClean() { # TODO Generalize
+    if [ "$sqlCli" = "psql" ];
+    then
+        runAndSave "$sqlCli $sqlParams -c \"$1\""
+    else
+        runAndSave "$sqlCli $sqlParams -e \"$1\""
+    fi
+}
+
+execMinCmdClean() { # TODO Generalize
+    if [ "$sqlCli" = "psql" ];
+    then
+        runAndSave "$sqlCli $sqlParamsMin -c \"$1\""
+    else
+        runAndSave "$sqlCli $sqlParamsMin -e \"$1\""
     fi
 }
 
@@ -415,7 +457,7 @@ saveVersionInDb() {
         erroMsg+=" Please set it to $1."
     fi
 
-    if [ "$($mysqlCli $mysqlParams -D $DBname -e "SELECT COUNT(version) as '' FROM $DBInfoTable;" 2>/dev/null | xargs)" = "0" ] ;
+    if [ "$(execCmd "SELECT COUNT(version) as '' FROM $DBInfoTable;" 2>/dev/null | xargs)" = "0" ] ;
     then
         sqlE=""
         if [ ! "$2" = "" ] && ( vergte "$1" "$2" );
@@ -424,7 +466,7 @@ saveVersionInDb() {
         else
             sqlE="INSERT INTO $DBInfoTable (version) VALUES ('$1');"
         fi
-        if ! runAndSave $mysqlCli $mysqlParams -D $DBname -e "$sqlE"  ;
+        if ! execCmdClean "$sqlE"  ;
         then
             echo -e "\tKO"
             exitError "$errorMsg"
@@ -437,7 +479,7 @@ saveVersionInDb() {
         else
             sqlE="UPDATE $DBInfoTable SET version = '$1';"
         fi
-        if ! runAndSave $mysqlCli $mysqlParams -D $DBname -e "$sqlE"  ;
+        if ! execCmdClean "$sqlE"  ;
         then
             echo -e "\tKO"
             exitError "$errorMsg"
@@ -456,7 +498,7 @@ trap exitClean SIGINT
 #
 
 echo -n "Checking mysql server connection .."
-if ! runAndSave $mysqlCli $mysqlParams -e "SELECT USER();" ;
+if ! execMinCmdClean "SELECT version();" ;
 then
     echo -e "\tKO"
     exitError "Error while connecting to mysql server, please check credentials"
@@ -619,19 +661,24 @@ fi
 #
 
 echo -en "Checking database status ..\t"
-if ! $mysqlCli $mysqlParams -e "SELECT SCHEMA_NAME FROM INFORMATION_SCHEMA.SCHEMATA WHERE SCHEMA_NAME = '$DBname';" 2>/dev/null | grep -q $DBname ;
+if ! execCmd "SELECT SCHEMA_NAME FROM INFORMATION_SCHEMA.SCHEMATA WHERE SCHEMA_NAME = '$DBname';" 2>/dev/null | grep -q $DBname ;
 then
     echo -e "\tKO"
     conditionalInput "Database $DBname does not exist yet on $DBhost, would you like to create it ? (Y/n)"
     if [[ "$uInput" = "Y" ]];
     then
         echo -n "Creating database $DBname on $DBhost .."
-        if ! runAndSave $mysqlCli $mysqlParams -e "CREATE DATABASE $DBname;" ;
+        if ! execMinCmdClean "CREATE DATABASE $DBname;" ;
         then
             echo -e "\tKO"
             exitError "Unable to create database" "Ignore critical error ? (Y/n)"
         elif [ "$OnlyVersionMonitoring" = "No" ];
         then
+            if [[ "$sqlCli" = "psql" ]] && ! execCmdClean "ALTER SCHEMA public RENAME TO $DBname;";
+            then
+                echo -e "\tKO"
+                exitError "Unable to rename public schema to $DBname" "Ignore critical error ? (Y/n)"
+            fi
             echo -e "\tOK"
 
             m=$(echo "$milestoneScripts" | sort -V -r | tail -n1)
@@ -646,7 +693,7 @@ then
                         echo -e "\tKO"
                         exitError "Unable to apply script $m" "Ignore error ? (Y/n)"
                     else
-                        if ! $mysqlCli $mysqlParams -e "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = '$DBname' AND TABLE_NAME = '$DBInfoTable';" 2>/dev/null 2>&1 | grep -q "$DBInfoTable" ;
+                        if ! execCmd "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = '$DBname' AND TABLE_NAME = '$DBInfoTable';" 2>/dev/null 2>&1 | grep -q "$DBInfoTable" ;
                         then
                             echo -e "\tOK"
                             echo "WARNING Fail to save milestone version automatically (No migration system on database)."
@@ -675,7 +722,7 @@ fi
 #
 
 echo -n "Checking version monitoring system .."
-if ! $mysqlCli $mysqlParams -e "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = '$DBname' AND TABLE_NAME = '$DBInfoTable';" 2>/dev/null 2>&1 | grep -q "$DBInfoTable" ;
+if ! execCmd "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = '$DBname' AND TABLE_NAME = '$DBInfoTable';" 2>/dev/null 2>&1 | grep -q "$DBInfoTable" ;
 then
     echo -e "\tKO"
 
@@ -689,7 +736,7 @@ then
             read -p "> " uInput
         done
         echo -n "Creating table $DBInfoTable in $DBname .."
-        if ! runAndSave $mysqlCli $mysqlParams -D $DBname -e "CREATE TABLE $DBInfoTable ( version VARCHAR(255) NOT NULL, max_version VARCHAR(255), PRIMARY KEY (version) ); INSERT INTO $DBInfoTable (version, max_version) VALUES ('$uInput', '$uInput');" ;
+        if ! execCmdClean "CREATE TABLE $DBInfoTable ( version VARCHAR(255) NOT NULL, max_version VARCHAR(255), PRIMARY KEY (version) ); INSERT INTO $DBInfoTable (version, max_version) VALUES ('$uInput', '$uInput');" ;
         then
             echo -e "\tKO"
             exitError "Unable to create table" "Ignore critical error ? (Y/n)"
@@ -706,7 +753,7 @@ else
     echo -e "\tOK"
 
     echo -n "Checking current version validity .."
-    actVer=$($mysqlCli $mysqlParams -D $DBname -e "SELECT version FROM $DBInfoTable;" 2>/dev/null | tail -n1)
+    actVer=$(execCmd "SELECT version FROM $DBInfoTable;" 2>/dev/null | sed '/^[[:space:]]*$/d' | xargs echo | tail -n1)
     if [[ ! $actVer =~ $versRegx ]] ;
     then
         echo -e "\tKO"
@@ -726,7 +773,7 @@ else
     fi
 
     echo -en "Checking max version status ..\t"
-    maxVer=$($mysqlCli $mysqlParams -D $DBname -e "SELECT max_version FROM $DBInfoTable;" 2>/dev/null | tail -n1)
+    maxVer=$(execCmd "SELECT max_version FROM $DBInfoTable;" 2>/dev/null | sed '/^[[:space:]]*$/d' | xargs echo | tail -n1)
     if [[ $maxVer =~ $versRegx ]];
     then
         echo -e "\tOK"
