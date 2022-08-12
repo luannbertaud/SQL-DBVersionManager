@@ -50,14 +50,14 @@ printHelp() {
     res=""
     res+="  -d,@--database@Name of the database to connect\n"
     res+="  -h,@--host@Server that host the database\n"
-    res+="  -u,@--user@User for authentication on the mysql server\n"
+    res+="  -u,@--user@User for authentication on the sql server\n"
     res+="  -c,@--config@Path to the configuration file from wich to load -d, -h, -u, -p\n"
     res+="     @          @ Default is [$ConfFile]\n"
     res+="  -r,@--reverse@Version to reset database to, scripts will be applied decreasingly\n"
     res+="  -v,@--version@Version to migrate the database to. By default all scripts are applied\n"
     res+="  -s,@--safe@Only apply migration scripts that have a matching reverse script before this version\n"
     res+="     @      @ After that version, regular migration will be applied\n"
-    res+="  -p,@--password@Password for the user on the mysql server\n"
+    res+="  -p,@--password@Password for the user on the sql server\n"
     res+="     @          @ If not provided by command line, a prompt will ask for it\n"
     res+="  -t,@--infoTable@Name of the table in database that contain the version tracking column\n"
     res+="     @           @ Default is [$DBInfoTable]\n"
@@ -146,11 +146,14 @@ then
     exit 1;
 fi
 
-if [ "$DBuser" = "" ]; then DBuser=$(cat $ConfFile | grep -E "^([ ]*)(db.default.user)" | cut -d = -f 2 | tr -d '"'); fi
-if [ "$DBpass" = "" ]; then DBpass=$(cat $ConfFile | grep -E "^([ ]*)(db.default.password)" | cut -d = -f 2 | tr -d '"'); fi
-if [ "$DBuri" = "" ]; then DBuri=$(cat $ConfFile | grep -E "^([ ]*)(db.default.url)" | cut -d = -f 2 | tr -d '"'); fi
-if [ "$DBhost" = "" ]; then DBhost=$(echo $DBuri | cut -d / -f 3); fi
-if [ "$DBname" = "" ]; then DBname=$(echo $DBuri | cut -d / -f 4 | cut -d ? -f 1); fi
+if [[ -f $ConfFile ]];
+then
+    if [ "$DBuser" = "" ]; then DBuser=$(cat $ConfFile | grep -E "^([ ]*)(db.default.user)" | cut -d = -f 2 | tr -d '"'); fi
+    if [ "$DBpass" = "" ]; then DBpass=$(cat $ConfFile | grep -E "^([ ]*)(db.default.password)" | cut -d = -f 2 | tr -d '"'); fi
+    if [ "$DBuri" = "" ]; then DBuri=$(cat $ConfFile | grep -E "^([ ]*)(db.default.url)" | cut -d = -f 2 | tr -d '"'); fi
+    if [ "$DBhost" = "" ]; then DBhost=$(echo $DBuri | cut -d / -f 3); fi
+    if [ "$DBname" = "" ]; then DBname=$(echo $DBuri | cut -d / -f 4 | cut -d ? -f 1); fi
+fi
 
 #
 # Error handling on parameters
@@ -236,12 +239,12 @@ then
 fi
 
 #
-# Mysql client verification
+# Sql client verification
 #
 
 if ! command -v $sqlCli &> /dev/null
 then
-    echo "ERROR Mysql client [$sqlCli] could not be found, --client must be one of ($(echo ${availableSQLCli[*]})) and available on your computer."
+    echo "ERROR Sql client [$sqlCli] could not be found, --client must be one of ($(echo ${availableSQLCli[*]})) and available on your computer."
     exit 1
 fi
 
@@ -497,11 +500,11 @@ trap exitClean SIGINT
 # Testing server connection with credentials
 #
 
-echo -n "Checking mysql server connection .."
+echo -n "Checking sql server connection .."
 if ! execMinCmdClean "SELECT version();" ;
 then
     echo -e "\tKO"
-    exitError "Error while connecting to mysql server, please check credentials"
+    exitError "Error while connecting to sql server, please check credentials"
 else
     echo -e "\tOK"
 fi
