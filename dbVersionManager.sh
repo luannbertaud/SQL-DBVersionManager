@@ -7,7 +7,7 @@
 # It is distributed under GNU GPLv3.0 License, if you add
 # modification to this script feels free to open a pull request.
 # See https://github.com/luannbertaud/SQL-DBVersionManager
-# Script version: v1.0.0
+# Script version: v1.1.0
 # --------------------------------------------------------------
 
 
@@ -21,7 +21,7 @@ DBname="";
 DBhost="";
 DBuser="";
 DBpass="";
-ConfFile="./prod.conf";
+ConfFile="./dbVersionManager.conf";
 DBInfoTable="db_info";
 MigrationFolder="./dbMigrationScripts/";
 MilestoneFolder="./dbMigrationScripts/";
@@ -106,6 +106,41 @@ printHelp() {
 }
 
 #
+# Read configuration file
+#
+
+setConfig=false
+for arg in $@
+do 
+    if $setConfig; then ConfFile=$arg; break; fi
+    if [ $arg = "-c" ] || [ $arg = "--config" ]; then setConfig=true; fi
+done
+
+if [[ -f $ConfFile ]];
+then
+    IFS="="
+    while read -r key val;
+    do
+        if [ "$key" = "db.user" ]; then DBuser=$(echo $val | tr -d '"'); fi
+        if [ "$key" = "db.password" ]; then DBpass=$(echo $val | tr -d '"'); fi
+        if [ "$key" = "db.url" ];
+        then
+            DBhost=$(echo $val | tr -d '"' | cut -d / -f 3)
+            DBname=$(echo $val | tr -d '"' | cut -d / -f 4 | cut -d ? -f 1)
+        fi
+        if [ "$key" = "db.host" ]; then DBhost=$(echo $val | tr -d '"'); fi
+        if [ "$key" = "db.name" ]; then DBname=$(echo $val | tr -d '"'); fi
+        if [ "$key" = "db.infoTable" ]; then DBInfoTable=$(echo $val | tr -d '"'); fi
+        if [ "$key" = "migration.scripts" ]; then MigrationFolder=$(echo $val | tr -d '"'); fi
+        if [ "$key" = "migration.reverseScripts" ]; then ReverseMigrationFolder=$(echo $val | tr -d '"'); fi
+        if [ "$key" = "migration.milestones" ]; then MilestoneFolder=$(echo $val | tr -d '"'); fi
+        if [ "$key" = "migration.client" ]; then sqlCli=$(echo $val | tr -d '"'); fi
+
+    done < $ConfFile
+fi
+IFS=$'\n'
+
+#
 # Parsing parameters
 #
 
@@ -114,7 +149,7 @@ while (( "$#" )); do
         -d|--database) DBname="$2"; shift ;;
         -h|--host) DBhost="$2"; shift ;;
         -u|--user) DBuser="$2"; shift ;;
-        -c|--config) ConfFile="$2"; shift ;;
+        -c|--config) shift ;;
         -r|--reverse) ReverseVersion="$2"; Reverse="Yes"; shift ;;
         -v|--version) MaxVersion="$2"; shift ;;
         -p|--password) DBpass="$2"; shift ;;
@@ -134,26 +169,6 @@ while (( "$#" )); do
     esac
     shift
 done
-
-#
-# Read configuration file
-#
-
-if [[ "$DBname" = "" || "$DBhost" = "" || "$DBuser" = "" ]] && [[ ! -f $ConfFile ]];
-then
-    echo "Invalid config parameters."
-    printHelp
-    exit 1;
-fi
-
-if [[ -f $ConfFile ]];
-then
-    if [ "$DBuser" = "" ]; then DBuser=$(cat $ConfFile | grep -E "^([ ]*)(db.default.user)" | cut -d = -f 2 | tr -d '"'); fi
-    if [ "$DBpass" = "" ]; then DBpass=$(cat $ConfFile | grep -E "^([ ]*)(db.default.password)" | cut -d = -f 2 | tr -d '"'); fi
-    if [ "$DBuri" = "" ]; then DBuri=$(cat $ConfFile | grep -E "^([ ]*)(db.default.url)" | cut -d = -f 2 | tr -d '"'); fi
-    if [ "$DBhost" = "" ]; then DBhost=$(echo $DBuri | cut -d / -f 3); fi
-    if [ "$DBname" = "" ]; then DBname=$(echo $DBuri | cut -d / -f 4 | cut -d ? -f 1); fi
-fi
 
 #
 # Error handling on parameters
@@ -329,9 +344,9 @@ runAndSave () {
 execScript() { # TODO Generalize
     if [ ! "$sqlCli" = "mysql" ];
     then
-        runAndSave $sqlCli $sqlParams -f $1
+        runAndSave "$sqlCli $sqlParams -f $1"
     else
-        runAndSave $sqlCli $sqlParams < $1
+        runAndSave "$sqlCli $sqlParams < $1"
     fi
 }
 
@@ -392,6 +407,11 @@ exitError() {
     then
         MaxVersion="No max version";
     fi
+    if [[ ! -f $ConfFile ]];
+    then
+        ConfFile="No"
+    fi
+
 
     echo
     echo "=================================/!\================================="
@@ -410,6 +430,7 @@ exitError() {
     echo -e "       Database name: $DBname"
     echo -e "       Database host: $DBhost"
     echo -e "       Database user: $DBuser"
+    echo -e "  Configuration file: $ConfFile"
     echo -e "     Downgrading DB : $Reverse"
     echo -e "       Start version: $actVer"
     echo -e "      DB max version: $maxVer"
@@ -710,6 +731,11 @@ then
                 fi
             fi
         else
+            if [[ "$sqlCli" = "psql" ]] && ! execCmdClean "ALTER SCHEMA public RENAME TO $DBname;";
+            then
+                echo -e "\tKO"
+                exitError "Unable to rename public schema to $DBname" "Ignore critical error ? (Y/n)"
+            fi
             echo -e "\tOK"
         fi
     else
