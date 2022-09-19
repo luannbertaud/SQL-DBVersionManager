@@ -7,7 +7,7 @@
 # It is distributed under GNU GPLv3.0 License, if you add
 # modification to this script feels free to open a pull request.
 # See https://github.com/luannbertaud/SQL-DBVersionManager
-# Script version: v1.1.0
+# Script version: v1.2.0
 # --------------------------------------------------------------
 
 
@@ -288,8 +288,8 @@ fi
 
 lastResult=$(mktemp $TmpFolder/.dbVersionManager.XXXXXXXXXXX.tmp)
 migrationScripts=$(ls -p $MigrationFolder/ | grep -E "$versRegx" | sort -V)
-milestoneScripts=$(ls -p $MilestoneFolder/ | grep -E "${versRegx::-1}(\-milestone)$" | cut -d - -f 1 | sort -V)
-reverseMigrationScripts=$(ls -p $ReverseMigrationFolder/ | grep -E "${versRegx::-1}(\-reverse)$" | cut -d - -f 1 | sort -V -r)
+milestoneScripts=$(ls -p $MilestoneFolder/ | grep -E "${versRegx:0:${#versRegx}-1}(\-milestone)$" | cut -d - -f 1 | sort -V)
+reverseMigrationScripts=$(ls -p $ReverseMigrationFolder/ | grep -E "${versRegx:0:${#versRegx}-1}(\-reverse)$" | cut -d - -f 1 | sort -V -r)
 
 exitClean() {
     rm $lastResult
@@ -604,11 +604,11 @@ then
     echo -n "Checking migration versions validity .."
     for m in $(ls -p $MigrationFolder/ | grep -E -v "$versRegx");
     do
-        if [[ $MigrationFolder = $MilestoneFolder && $m =~ ${versRegx::-1}(\-milestone)$ ]];
+        if [[ $MigrationFolder = $MilestoneFolder && $m =~ ${versRegx:0:${#versRegx}-1}(\-milestone)$ ]];
         then
             continue
         fi 
-        if [[ $MigrationFolder = $ReverseMigrationFolder && $m =~ ${versRegx::-1}(\-reverse)$ ]];
+        if [[ $MigrationFolder = $ReverseMigrationFolder && $m =~ ${versRegx:0:${#versRegx}-1}(\-reverse)$ ]];
         then
             continue
         fi 
@@ -629,9 +629,9 @@ then
     #
 
     echo -n "Checking reverse versions validity .."
-    for m in $(ls -p $ReverseMigrationFolder/ | grep -E -v "${versRegx::-1}(\-reverse)$");
+    for m in $(ls -p $ReverseMigrationFolder/ | grep -E -v "${versRegx:0:${#versRegx}-1}(\-reverse)$");
     do
-        if [[ $ReverseMigrationFolder = $MilestoneFolder && $m =~ ${versRegx::-1}(\-milestone)$ ]];
+        if [[ $ReverseMigrationFolder = $MilestoneFolder && $m =~ ${versRegx:0:${#versRegx}-1}(\-milestone)$ ]];
         then
             continue
         fi 
@@ -642,11 +642,11 @@ then
         echo -e "\tKO"
         echo "Error verifying reverse versions:" > $lastResult
         echo -e "  [$m] filename is not recognized as a reverse version" >> $lastResult
-        echo -e "  Regex for a reverse version: ${versRegx::-1}(\-reverse)$" >> $lastResult
+        echo -e "  Regex for a reverse version: ${versRegx:0:${#versRegx}-1}(\-reverse)$" >> $lastResult
         exitError "Invalid reverse version"
     done
     echo -e "\tOK"
-    if ! ls -p $ReverseMigrationFolder/ | grep -E "${versRegx::-1}(\-reverse)$" >/dev/null 2>&1 ;
+    if ! ls -p $ReverseMigrationFolder/ | grep -E "${versRegx:0:${#versRegx}-1}(\-reverse)$" >/dev/null 2>&1 ;
     then
         echo "WARNING No reverse migration script found in [$ReverseMigrationFolder]."
     fi
@@ -656,9 +656,9 @@ then
     #
 
     echo -n "Checking milestone versions validity .."
-    for m in $(ls -p $MilestoneFolder/ | grep -E -v "${versRegx::-1}(\-milestone)$");
+    for m in $(ls -p $MilestoneFolder/ | grep -E -v "${versRegx:0:${#versRegx}-1}(\-milestone)$");
     do
-        if [[ $MilestoneFolder = $ReverseMigrationFolder && $m =~ ${versRegx::-1}(\-reverse)$ ]];
+        if [[ $MilestoneFolder = $ReverseMigrationFolder && $m =~ ${versRegx:0:${#versRegx}-1}(\-reverse)$ ]];
         then
             continue
         fi 
@@ -669,11 +669,11 @@ then
         echo -e "\tKO"
         echo "Error verifying milestone versions:" > $lastResult
         echo -e "  [$m] filename is not recognized as a milestone version" >> $lastResult
-        echo -e "  Regex for a milestone version: ${versRegx::-1}(\-milestone)$" >> $lastResult
+        echo -e "  Regex for a milestone version: ${versRegx:0:${#versRegx}-1}(\-milestone)$" >> $lastResult
         exitError "Invalid milestone version"
     done
     echo -e "\tOK"
-    if ! ls -p $MilestoneFolder/ | grep -E "${versRegx::-1}(\-milestone)$" >/dev/null 2>&1 ;
+    if ! ls -p $MilestoneFolder/ | grep -E "${versRegx:0:${#versRegx}-1}(\-milestone)$" >/dev/null 2>&1 ;
     then
         echo "WARNING No milestone script found in [$MilestoneFolder]."
     fi
