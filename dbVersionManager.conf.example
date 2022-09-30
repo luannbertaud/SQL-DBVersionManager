@@ -2,6 +2,7 @@ db.user=username
 db.password=password
 db.name=mydatabase
 db.host=localhost
+db.port=5000
 db.infoTable=db_info
 
 migration.scripts=./dbMigrationScripts

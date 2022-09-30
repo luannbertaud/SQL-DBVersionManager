@@ -7,7 +7,7 @@
 # It is distributed under GNU GPLv3.0 License, if you add
 # modification to this script feels free to open a pull request.
 # See https://github.com/luannbertaud/SQL-DBVersionManager
-# Script version: v1.2.0
+# Script version: v1.3.0
 # --------------------------------------------------------------
 
 
@@ -19,6 +19,7 @@
 
 DBname="";
 DBhost="";
+DBport="";
 DBuser="";
 DBpass="";
 ConfFile="./dbVersionManager.conf";
@@ -51,6 +52,8 @@ printHelp() {
     res+="  -d,@--database@Name of the database to connect\n"
     res+="  -h,@--host@Server that host the database\n"
     res+="  -u,@--user@User for authentication on the sql server\n"
+    res+="  -P,@--port@Port on the server where to access the database\n"
+    res+="     @          @ Default is depending on --client\n"
     res+="  -c,@--config@Path to the configuration file from wich to load -d, -h, -u, -p\n"
     res+="     @          @ Default is [$ConfFile]\n"
     res+="  -r,@--reverse@Version to reset database to, scripts will be applied decreasingly\n"
@@ -129,6 +132,7 @@ then
             DBname=$(echo $val | tr -d '"' | cut -d / -f 4 | cut -d ? -f 1)
         fi
         if [ "$key" = "db.host" ]; then DBhost=$(echo $val | tr -d '"'); fi
+        if [ "$key" = "db.port" ]; then DBport=$(echo $val | tr -d '"'); fi
         if [ "$key" = "db.name" ]; then DBname=$(echo $val | tr -d '"'); fi
         if [ "$key" = "db.infoTable" ]; then DBInfoTable=$(echo $val | tr -d '"'); fi
         if [ "$key" = "migration.scripts" ]; then MigrationFolder=$(echo $val | tr -d '"'); fi
@@ -148,6 +152,7 @@ while (( "$#" )); do
     case $1 in
         -d|--database) DBname="$2"; shift ;;
         -h|--host) DBhost="$2"; shift ;;
+        -P|--port) DBport="$2"; shift ;;
         -u|--user) DBuser="$2"; shift ;;
         -c|--config) shift ;;
         -r|--reverse) ReverseVersion="$2"; Reverse="Yes"; shift ;;
@@ -267,21 +272,22 @@ fi
 # Declaration of useful tools
 #
 
-# TODO not default port selection
-
 if [ "$sqlCli" = "mysql" ];
 then
     sqlParamsMin="-h $DBhost -u $DBuser --password=$DBpass";
-    sqlParams="$sqlParamsMin -D $DBname";
+    if [[ $DBport != '' ]]; then sqlParamsMin="$sqlParamsMin -P $DBport"; fi;
+    sqlParams="$sqlParamsMin -N -D $DBname";
 fi
 if [ "$sqlCli" = "mysqlsh.exe" ];
 then
     sqlParamsMin="-h $DBhost -u $DBuser --password=$DBpass";
-    sqlParams="$sqlParamsMin --save-passwords=never --sql -D $DBname";
+    if [[ $DBport != '' ]]; then sqlParamsMin="$sqlParamsMin -P $DBport"; fi;
+    sqlParams="$sqlParamsMin --save-passwords=never --sql -N -D $DBname";
 fi
 if [ "$sqlCli" = "psql" ];
 then
     sqlParamsMin="-h $DBhost -U $DBuser";
+    if [[ $DBport != '' ]]; then sqlParamsMin="$sqlParamsMin -p $DBport"; fi;
     export PGPASSWORD=$DBpass
     sqlParams="$sqlParamsMin -qt -d $DBname -c \"SET search_path = $DBname;\"";
 fi
@@ -481,7 +487,7 @@ saveVersionInDb() {
         erroMsg+=" Please set it to $1."
     fi
 
-    if [ "$(execCmd "SELECT COUNT(version) as '' FROM $DBInfoTable;" 2>/dev/null | xargs)" = "0" ] ;
+    if [ "$(execCmd "SELECT COUNT(version) FROM $DBInfoTable;" 2>/dev/null)" = "0" ] ;
     then
         sqlE=""
         if [ ! "$2" = "" ] && ( vergte "$1" "$2" );
