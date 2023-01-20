@@ -5,9 +5,9 @@
 # This script aims to facilitate the implementation of a
 # versioning system to any *SQL database.
 # It is distributed under GNU GPLv3.0 License, if you add
-# modification to this script feels free to open a pull request.
+# modification to this script feel free to open a pull request.
 # See https://github.com/luannbertaud/SQL-DBVersionManager
-# Script version: v1.3.0
+# Script version: v1.4.0
 # --------------------------------------------------------------
 
 
@@ -43,7 +43,7 @@ actVer="unknown";
 maxVer="unknown";
 progName="$0";
 sqlCli="mysql";
-availableSQLCli=("mysql" "mysqlsh.exe" "psql")
+availableSQLCli=("mysql" "mysqlsh.exe" "psql");
 versRegx='^[0-9]+(\.[0-9]+)*$';
 
 printHelp() {
@@ -76,7 +76,6 @@ printHelp() {
     res+="     @--bypassErrors@Some errors can be bypassed by selecting this flag\n"
     res+="     @              @ A prompt will be displayed when bypass is available, be carreful.\n"
     res+="     @--versionMonitoringOnly@Only enabling version monitoring, no scripts applied\n"
-    res+="     @              @ A prompt will be displayed when bypass is available, be carreful.\n"
     res+="     @--client@Use this flag to select the SQL client\n"
     res+="     @              @ Can be either: ($(echo ${availableSQLCli[*]})).\n"
     res+="     @              @ Default is [$sqlCli]\n"
@@ -112,7 +111,7 @@ printHelp() {
 # Read configuration file
 #
 
-setConfig=false
+setConfig=false;
 for arg in $@
 do 
     if $setConfig; then ConfFile=$arg; break; fi
@@ -121,6 +120,7 @@ done
 
 if [[ -f $ConfFile ]];
 then
+    SAVED_IFS=$IFS
     IFS="="
     while read -r key val;
     do
@@ -141,8 +141,8 @@ then
         if [ "$key" = "migration.client" ]; then sqlCli=$(echo $val | tr -d '"'); fi
 
     done < $ConfFile
+    IFS="$SAVED_IFS"
 fi
-IFS=$'\n'
 
 #
 # Parsing parameters
@@ -292,10 +292,10 @@ then
     sqlParams="$sqlParamsMin -qt -d $DBname -c \"SET search_path = $DBname;\"";
 fi
 
-lastResult=$(mktemp $TmpFolder/.dbVersionManager.XXXXXXXXXXX.tmp)
-migrationScripts=$(ls -p $MigrationFolder/ | grep -E "$versRegx" | sort -V)
-milestoneScripts=$(ls -p $MilestoneFolder/ | grep -E "${versRegx:0:${#versRegx}-1}(\-milestone)$" | cut -d - -f 1 | sort -V)
-reverseMigrationScripts=$(ls -p $ReverseMigrationFolder/ | grep -E "${versRegx:0:${#versRegx}-1}(\-reverse)$" | cut -d - -f 1 | sort -V -r)
+lastResult=$(mktemp $TmpFolder/.dbVersionManager.XXXXXXXXXXX.tmp);
+migrationScripts=($(ls -p $MigrationFolder/ | grep -E "$versRegx" | sort -V));
+milestoneScripts=($(ls -p $MilestoneFolder/ | grep -E "${versRegx:0:${#versRegx}-1}(\-milestone)$" | cut -d - -f 1 | sort -V));
+reverseMigrationScripts=($(ls -p $ReverseMigrationFolder/ | grep -E "${versRegx:0:${#versRegx}-1}(\-reverse)$" | cut -d - -f 1 | sort -V -r));
 
 exitClean() {
     rm $lastResult
@@ -328,7 +328,7 @@ isClosest() {
         return 0;
     fi
     lastOne="";
-    for m in $migrationScripts;
+    for m in "${migrationScripts[@]}";
     do
         if [ "$m" = "$1" ] || [ "$m" = "$2" ];
         then
@@ -340,6 +340,95 @@ isClosest() {
         lastOne=$m;
     done
     return 1;
+}
+
+encodeVersionsFingerprint() {
+    local versions=()
+    local SAVED_IFS=$IFS
+    local currentVers=$1
+    IFS=","
+
+    for m in "${migrationScripts[@]}";
+    do
+        if ( vergt $m $currentVers ); then break; fi
+        versions+=($m)
+    done
+
+    availableVersionsFingerprint="${versions[*]}"
+    IFS="$SAVED_IFS"
+    availableVersionsFingerprint="$(echo $availableVersionsFingerprint | base64 -w 0)"
+}
+
+decodeVersionsFingerprint() {
+    local -n versions=$1
+    local SAVED_IFS=$IFS
+
+    availableVersionsFingerprint=$(execCmd "SELECT fingerprint FROM $DBInfoTable;" 2>/dev/null | sed '/^[[:space:]]*$/d' | xargs echo | tail -n1)
+    IFS=","
+    read -ra versions <<< "$(echo $availableVersionsFingerprint | base64 -d)"
+    IFS="$SAVED_IFS"
+}
+
+checkVersionsFingerprint() {
+    local versions=()
+    local fVersions=()
+    local lastValidVersion="0.0.0";
+    local onlyValidVersions=true;
+    local res=0;
+    local currentVers=$1;
+    local interactive=$2;
+
+    decodeVersionsFingerprint fVersions
+    for m in "${migrationScripts[@]}";
+    do
+        if ( vergt $m $currentVers ); then break; fi
+        versions+=($m)
+    done
+
+    local iv=0
+    local if=0
+    while [ $iv -lt ${#versions[@]} ] || [ $if -lt ${#fVersions[@]} ] ;
+    do
+        if [ $if -ge ${#fVersions[@]} ];
+        then
+            if [ $interactive = true ]; then echo "Versions from ${versions[$iv]} (inclusive) to $currentVers (exclusive) have not been applied"; fi
+            res=1;
+            break;
+        fi
+        if [ $iv -ge ${#versions[@]} ];
+        then
+            if [ $interactive = true ]; then echo "Versions from ${versions[$iv-1]} (exclusive) to $currentVers (inclusive) are missing in your folder"; fi
+            res=1;
+            break;
+        fi
+        if [[ ! "${versions[$iv]}" = "${fVersions[$if]}" ]];
+        then
+            if [ $interactive = true ];
+            then
+                if [[ ${#versions[@]} -gt ${#fVersions[@]} ]];
+                then
+                    conditionalInput "Version ${versions[$iv]} has not been applied, stop inspection here ? (Y/n)"
+                else
+                    conditionalInput "Version ${fVersions[$if]} is missing in your folder, stop inspection here ? (Y/n)"
+                fi
+            else
+                uInput="Y";
+            fi
+            res=1;
+            if [[ "$uInput" = "Y" ]]; then break; else onlyValidVersions=false; fi
+        else
+            if [ $onlyValidVersions = true ]; then lastValidVersion="${versions[$iv]}"; fi
+            ((if=if+1))
+        fi
+        ((iv=iv+1))
+    done
+
+    if [ $res = 1 ] && [ $interactive = true ];
+    then
+        echo "To correct the database versioning sequence, please downgrade to v$lastValidVersion. Then re-apply the migration. (see --reverse)"
+        exitClean;
+    fi
+    return $res;
 }
 
 runAndSave () {
@@ -478,6 +567,8 @@ exitError() {
 }
 
 saveVersionInDb() {
+    
+    encodeVersionsFingerprint $1
 
     errorMsg="Unable to save version in database table [$DBInfoTable]."
     if [ ! "$3" = "" ];
@@ -492,9 +583,9 @@ saveVersionInDb() {
         sqlE=""
         if [ ! "$2" = "" ] && ( vergte "$1" "$2" );
         then
-            sqlE="INSERT INTO $DBInfoTable (version, max_version) VALUES ('$1', '$1');"
+            sqlE="INSERT INTO $DBInfoTable (version, max_version, fingerprint) VALUES ('$1', '$1', '$availableVersionsFingerprint');"
         else
-            sqlE="INSERT INTO $DBInfoTable (version) VALUES ('$1');"
+            sqlE="INSERT INTO $DBInfoTable (version, fingerprint) VALUES ('$1', '$availableVersionsFingerprint');"
         fi
         if ! execCmdClean "$sqlE"  ;
         then
@@ -505,9 +596,9 @@ saveVersionInDb() {
         sqlE=""
         if [ ! "$2" = "" ] && ( vergte "$1" "$2" );
         then
-            sqlE="UPDATE $DBInfoTable SET version = '$1', max_version = '$1';"
+            sqlE="UPDATE $DBInfoTable SET version = '$1', max_version = '$1', fingerprint = '$availableVersionsFingerprint';"
         else
-            sqlE="UPDATE $DBInfoTable SET version = '$1';"
+            sqlE="UPDATE $DBInfoTable SET version = '$1', fingerprint = '$availableVersionsFingerprint';"
         fi
         if ! execCmdClean "$sqlE"  ;
         then
@@ -711,7 +802,11 @@ then
             fi
             echo -e "\tOK"
 
-            m=$(echo "$milestoneScripts" | sort -V -r | tail -n1)
+            m=""
+            if [ ${#milestoneScripts[@]} -gt 0 ];
+            then
+                m=${milestoneScripts[-1]}
+            fi
             if [ ! "$m" = "" ];
             then
                 conditionalInput "Last milestone found is $m, would you like to populate database from it ? (Y/n)"
@@ -771,7 +866,7 @@ then
             read -p "> " uInput
         done
         echo -n "Creating table $DBInfoTable in $DBname .."
-        if ! execCmdClean "CREATE TABLE $DBInfoTable ( version VARCHAR(255) NOT NULL, max_version VARCHAR(255), PRIMARY KEY (version) ); INSERT INTO $DBInfoTable (version, max_version) VALUES ('$uInput', '$uInput');" ;
+        if ! execCmdClean "CREATE TABLE $DBInfoTable ( version VARCHAR(255) NOT NULL, max_version VARCHAR(255), fingerprint VARCHAR(255), PRIMARY KEY (version) ); INSERT INTO $DBInfoTable (version, max_version, fingerprint) VALUES ('$uInput', '$uInput', 'TODO');" ;
         then
             echo -e "\tKO"
             exitError "Unable to create table" "Ignore critical error ? (Y/n)"
@@ -837,24 +932,34 @@ then
 fi
 
 #
+# Veryfing scripts integrity
+# 
+
+echo -n "Checking migration scripts integrity .."
+if [ "$Reverse" = "No" ] && ! checkVersionsFingerprint $actVer false ;
+then
+    echo -e "\tKO"
+    checkVersionsFingerprint $actVer true
+else
+    echo -e "\tOK"
+fi
+
+#
 # Applying migration
 #
 
 migrationStarted=false
 scripts=""
 scriptsFolder=""
-compFun=""
 fileExt=""
 if [ "$Reverse" = "Yes" ];
 then
-    scripts=$reverseMigrationScripts
+    scripts=(${reverseMigrationScripts[@]})
     scriptsFolder=$ReverseMigrationFolder
-    compFun=verlt
     fileExt="-reverse"
 else
-    scripts=$migrationScripts
+    scripts=(${migrationScripts[@]})
     scriptsFolder=$MigrationFolder
-    compFun=vergte
 fi
 
 if [ "$SafeMigration" = "Yes" ];
@@ -862,7 +967,7 @@ then
     echo "INFO Safe migration is activated, searching only for scripts that have a matching reverse."
 fi
 
-for m in $scripts;
+for m in "${scripts[@]}";
 do
     if [ "$Reverse" = "No" ] && [ "$(vergte $actVer $m ; echo $?)" = "0" ]; then continue; fi
     if [ "$Reverse" = "No" ] && [ ! "$MaxVersion" = "" ] && [ "$(vergt $m $MaxVersion ; echo $?)" = "0" ]; then break; fi
@@ -920,7 +1025,7 @@ done
 # Save state and cleanup
 #
 
-scriptMax=$(echo "$scripts" | tail -n1)
+scriptMax=${scripts[-1]}
 if [ ! "$MaxVersion" = "" ];
 then
     if ( verlt $MaxVersion $scriptMax);
