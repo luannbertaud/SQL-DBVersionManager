@@ -7,7 +7,7 @@
 # It is distributed under GNU GPLv3.0 License, if you add
 # modification to this script feel free to open a pull request.
 # See https://github.com/luannbertaud/SQL-DBVersionManager
-# Script version: v1.4.0
+# Script version: v1.4.1
 # --------------------------------------------------------------
 
 
@@ -353,10 +353,17 @@ encodeVersionsFingerprint() {
         if ( vergt $m $currentVers ); then break; fi
         versions+=($m)
     done
+    if [ ${#versions[@]} -gt 0 ];
+    then
+        if [ ! ${versions[-1]} = $currentVers ]; then versions+=($currentVers); fi
+    else
+        versions+=($currentVers)
+    fi
 
     availableVersionsFingerprint="${versions[*]}"
     IFS="$SAVED_IFS"
-    availableVersionsFingerprint="$(echo $availableVersionsFingerprint | base64 -w 0)"
+    availableVersionsFingerprint="$(echo "$availableVersionsFingerprint" | base64)"
+    availableVersionsFingerprint="$(echo "$availableVersionsFingerprint" | tr -d '\r\n')"
 }
 
 decodeVersionsFingerprint() {
@@ -384,6 +391,12 @@ checkVersionsFingerprint() {
         if ( vergt $m $currentVers ); then break; fi
         versions+=($m)
     done
+    if [ ${#versions[@]} -gt 0 ];
+    then
+        if [ ! ${versions[-1]} = $currentVers ]; then versions+=($currentVers); fi
+    else
+        versions+=($currentVers)
+    fi
 
     local iv=0
     local if=0
@@ -866,7 +879,8 @@ then
             read -p "> " uInput
         done
         echo -n "Creating table $DBInfoTable in $DBname .."
-        if ! execCmdClean "CREATE TABLE $DBInfoTable ( version VARCHAR(255) NOT NULL, max_version VARCHAR(255), fingerprint VARCHAR(255), PRIMARY KEY (version) ); INSERT INTO $DBInfoTable (version, max_version, fingerprint) VALUES ('$uInput', '$uInput', 'TODO');" ;
+        encodeVersionsFingerprint $uInput
+        if ! execCmdClean "CREATE TABLE $DBInfoTable ( version VARCHAR(255) NOT NULL, max_version VARCHAR(255), fingerprint VARCHAR(255), PRIMARY KEY (version) ); INSERT INTO $DBInfoTable (version, max_version, fingerprint) VALUES ('$uInput', '$uInput', '$availableVersionsFingerprint');" ;
         then
             echo -e "\tKO"
             exitError "Unable to create table" "Ignore critical error ? (Y/n)"
