@@ -7,7 +7,7 @@
 # It is distributed under GNU GPLv3.0 License, if you add
 # modification to this script feel free to open a pull request.
 # See https://github.com/luannbertaud/SQL-DBVersionManager
-# Script version: v1.4.1
+# Script version: v1.4.2
 # --------------------------------------------------------------
 
 
@@ -880,7 +880,7 @@ then
         done
         echo -n "Creating table $DBInfoTable in $DBname .."
         encodeVersionsFingerprint $uInput
-        if ! execCmdClean "CREATE TABLE $DBInfoTable ( version VARCHAR(255) NOT NULL, max_version VARCHAR(255), fingerprint VARCHAR(255), PRIMARY KEY (version) ); INSERT INTO $DBInfoTable (version, max_version, fingerprint) VALUES ('$uInput', '$uInput', '$availableVersionsFingerprint');" ;
+        if ! execCmdClean "CREATE TABLE $DBInfoTable ( version VARCHAR(255) NOT NULL, max_version VARCHAR(255), fingerprint VARCHAR, PRIMARY KEY (version) ); INSERT INTO $DBInfoTable (version, max_version, fingerprint) VALUES ('$uInput', '$uInput', '$availableVersionsFingerprint');" ;
         then
             echo -e "\tKO"
             exitError "Unable to create table" "Ignore critical error ? (Y/n)"
